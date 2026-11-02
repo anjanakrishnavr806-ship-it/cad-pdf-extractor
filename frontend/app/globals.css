@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  @apply min-h-screen bg-slate-50 text-slate-900 antialiased;
+  background-image:
+    radial-gradient(circle at 15% -10%, rgba(15, 23, 42, 0.06), transparent 45%),
+    radial-gradient(circle at 85% 0%, rgba(16, 185, 129, 0.07), transparent 40%);
+  background-attachment: fixed;
+}
+
+::selection {
+  @apply bg-slate-900 text-white;
+}
