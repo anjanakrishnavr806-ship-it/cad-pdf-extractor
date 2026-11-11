@@ -6,6 +6,7 @@ export interface PageInfo {
   height_mm: number;
   rotation_degrees: number;
   text_characters: number;
+  text_source: "selectable" | "ocr" | "mixed" | "ocr_empty" | "none";
   vector_paths: number | null;
   vector_segments: number | null;
   text: string;
@@ -29,6 +30,7 @@ export interface ExtractionSummary {
   page_count: number;
   pages_with_selectable_text: number;
   pages_without_selectable_text: number;
+  pages_with_ocr_text: number;
   total_text_characters: number;
   total_vector_paths: number | null;
   total_vector_segments: number | null;
@@ -43,6 +45,7 @@ export type RoomType =
   | "study"
   | "store"
   | "corridor"
+  | "balcony"
   | "other";
 
 export interface RoomRegion {
@@ -64,6 +67,7 @@ export interface Room {
   width_mm: number | null;
   height_mm: number | null;
   area_m2: number | null;
+  printed_dimensions: string | null;
   dimension_status: string;
   combined_label: boolean;
   also_matches: RoomType[];
@@ -98,6 +102,9 @@ export interface AnalysisDiagnostics {
   pages_analyzed: number;
   pages_with_room_labels: number;
   pages_with_embedded_images: number;
+  pages_with_ocr_text: number;
+  pages_ocr_attempted: number;
+  ocr_available: boolean;
   text_lines_scanned: number;
   room_label_candidates: number;
   duplicate_labels_merged: number;

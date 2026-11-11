@@ -82,8 +82,14 @@ def build_result(
             preview_dpi=dpi,
             max_preview_pages=pages_limit,
             count_vectors=vectors,
+            include_analysis_data=True,
         )
-        analysis = analyze_rooms(data, password=password)
+        analysis_pages = info.pop("_analysis_pages")
+        analysis = analyze_rooms(
+            data,
+            password=password,
+            extracted_pages=analysis_pages,
+        )
     except PermissionError as exc:
         raise ExtractionError(friendly_error(exc), status=401, code="password_required")
     except Exception as exc:
@@ -104,7 +110,12 @@ def build_result(
     total_paths = sum(p.get("vector_paths") or 0 for p in pages)
     total_segments = sum(p.get("vector_segments") or 0 for p in pages)
     total_text = sum(p.get("text_characters", 0) for p in pages)
-    pages_with_text = sum(1 for p in pages if p.get("text_characters", 0) > 0)
+    pages_with_text = sum(
+        1 for p in pages if p.get("text_source") in {"selectable", "mixed"}
+    )
+    pages_with_ocr = sum(
+        1 for p in pages if p.get("text_source") in {"ocr", "mixed"}
+    )
 
     return {
         "filename": filename,
@@ -119,6 +130,7 @@ def build_result(
             "page_count": len(pages),
             "pages_with_selectable_text": pages_with_text,
             "pages_without_selectable_text": len(pages) - pages_with_text,
+            "pages_with_ocr_text": pages_with_ocr,
             "total_text_characters": total_text,
             "total_vector_paths": total_paths if vectors else None,
             "total_vector_segments": total_segments if vectors else None,

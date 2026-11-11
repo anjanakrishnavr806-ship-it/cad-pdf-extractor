@@ -32,14 +32,24 @@ function downloadJson(payload: string, filename: string) {
 }
 
 function dimensionText(room: Room): string {
+  if (room.printed_dimensions) return room.printed_dimensions;
   if (room.width_mm === null || room.height_mm === null) return "—";
   return `${room.width_mm} × ${room.height_mm} mm`;
+}
+
+function openingSourceHint(status: string): string {
+  if (status === "not_detected") return "not reliably detectable";
+  if (status === "detected_from_plan_tags") return "from plan tags";
+  if (status === "detected_from_schedule") return "from schedule";
+  return "from text labels";
 }
 
 function statusText(room: Room): string {
   const parts: string[] = [room.confidence];
   if (room.detection === "inferred") parts.push("inferred");
-  if (room.dimension_status === "calculated") parts.push("scaled");
+  if (room.dimension_status === "read_from_drawing") parts.push("from drawing");
+  else if (room.dimension_status === "calculated") parts.push("scaled");
+  else if (room.dimension_status === "not_calculated_no_region") parts.push("no room outline");
   else parts.push("no scale");
   return parts.join(" · ");
 }
@@ -127,36 +137,23 @@ function PageCard({
         <span className="text-slate-400">{open ? "−" : "+"}</span>
       </button>
       {open && (
-        <div className="grid gap-4 border-t border-slate-100 p-4 md:grid-cols-2">
-          <div>
-            {preview ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={preview}
-                alt={`Preview of page ${page.page_number}`}
-                className="w-full rounded-lg border border-slate-200 bg-white"
-              />
-            ) : (
-              <p className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-500">
-                No preview for this page.
-              </p>
-            )}
-            <p className="mt-2 text-xs text-slate-500">
-              Rendered at {dpi} DPI · {page.width_points} × {page.height_points}{" "}
-              pt · rotation {page.rotation_degrees}°
+        <div className="border-t border-slate-100 p-4">
+          {preview ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={preview}
+              alt={`Preview of page ${page.page_number}`}
+              className="w-full rounded-lg border border-slate-200 bg-white"
+            />
+          ) : (
+            <p className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-500">
+              No preview for this page.
             </p>
-          </div>
-          <div>
-            {page.text_characters === 0 ? (
-              <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-600">
-                No selectable text on this page.
-              </p>
-            ) : (
-              <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-50 p-3 font-mono text-xs text-slate-700">
-                {page.text}
-              </pre>
-            )}
-          </div>
+          )}
+          <p className="mt-2 text-xs text-slate-500">
+            Rendered at {dpi} DPI · {page.width_points} × {page.height_points}{" "}
+            pt · rotation {page.rotation_degrees}°
+          </p>
         </div>
       )}
     </div>
@@ -174,7 +171,6 @@ export default function Home() {
   const [error, setError] = useState<ApiError | null>(null);
   const [result, setResult] = useState<ExtractResponse | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [rawTextOpen, setRawTextOpen] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [selectionNote, setSelectionNote] = useState("");
@@ -245,7 +241,6 @@ export default function Home() {
     setError(null);
     setResult(null);
     setPreviewOpen(false);
-    setRawTextOpen(false);
     setDiagnosticsOpen(false);
     setStatus("uploading");
     setStatusMessage("Uploading PDF to the local backend…");
@@ -277,7 +272,7 @@ export default function Home() {
         return;
       }
       setResult(body as ExtractResponse);
-      // With no selectable text the only useful output is the drawing image.
+      // When no text could be extracted, the drawing preview is most useful.
       setPreviewOpen((body as ExtractResponse).analysis?.status === "no_text");
       setStatus("done");
       setStatusMessage("");
@@ -595,11 +590,7 @@ export default function Home() {
                     ? analysis.summary.doors.count
                     : "—"
                 }
-                hint={
-                  analysis.summary.doors.status === "not_detected"
-                    ? "not reliably detectable"
-                    : "from text labels"
-                }
+                hint={openingSourceHint(analysis.summary.doors.status)}
               />
               <SummaryCard
                 label="Windows"
@@ -608,11 +599,7 @@ export default function Home() {
                     ? analysis.summary.windows.count
                     : "—"
                 }
-                hint={
-                  analysis.summary.windows.status === "not_detected"
-                    ? "not reliably detectable"
-                    : "from text labels"
-                }
+                hint={openingSourceHint(analysis.summary.windows.status)}
               />
             </div>
           </div>
@@ -722,34 +709,6 @@ export default function Home() {
             </div>
           </CollapsibleSection>
 
-          {/* ---------- Collapsible: raw text ---------- */}
-          <CollapsibleSection
-            title="Raw extracted text"
-            open={rawTextOpen}
-            onToggle={() => setRawTextOpen((v) => !v)}
-          >
-            {result.summary.pages_with_selectable_text === 0 ? (
-              <p className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                No selectable text was found on any page. OCR is currently
-                unavailable in this app — please try a text-based CAD PDF with
-                selectable room labels.
-              </p>
-            ) : (
-              <div className="space-y-4">
-                {result.pages.map((page) => (
-                  <div key={page.page_number}>
-                    <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Page {page.page_number} ({page.text_characters} characters)
-                    </p>
-                    <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-50 p-3 font-mono text-xs text-slate-700">
-                      {page.text || "(empty)"}
-                    </pre>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CollapsibleSection>
-
           {/* ---------- Collapsible: technical diagnostics ---------- */}
           <CollapsibleSection
             title="Technical diagnostics"
@@ -773,6 +732,18 @@ export default function Home() {
                 <dt className="text-slate-500">Pages with embedded images</dt>
                 <dd className="font-medium text-slate-800">
                   {analysis.diagnostics.pages_with_embedded_images}
+                </dd>
+              </div>
+              <div className="flex justify-between border-b border-slate-100 py-1">
+                <dt className="text-slate-500">Tesseract on PATH</dt>
+                <dd className="font-medium text-slate-800">
+                  {analysis.diagnostics.ocr_available ? "Available" : "Not installed"}
+                </dd>
+              </div>
+              <div className="flex justify-between border-b border-slate-100 py-1">
+                <dt className="text-slate-500">Pages read with OCR</dt>
+                <dd className="font-medium text-slate-800">
+                  {analysis.diagnostics.pages_with_ocr_text}
                 </dd>
               </div>
               <div className="flex justify-between border-b border-slate-100 py-1">
@@ -859,8 +830,8 @@ export default function Home() {
                 area.
               </li>
               <li>
-                No OCR support — image-only or scanned drawings cannot be
-                classified; try a text-based CAD PDF.
+                Scanned drawings use Tesseract OCR when installed; verify
+                recognized text because OCR can misread labels.
               </li>
               <li>Vector paths are never counted as rooms.</li>
             </ul>

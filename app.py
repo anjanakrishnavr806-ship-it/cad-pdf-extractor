@@ -1,8 +1,8 @@
 """CAD PDF Extractor - a lightweight, local Streamlit application.
 
-Extracts selectable text, page information, page previews and vector
-drawing statistics from PDF engineering drawings, floor plans and CAD
-exports. Everything runs locally, in memory.
+Extracts selectable or OCR-recognized text, page information, page
+previews and vector drawing statistics from PDF engineering drawings,
+floor plans and CAD exports. Everything runs locally, in memory.
 
 The PDF extraction logic lives in extractor.py and is shared with the
 FastAPI backend (backend/main.py) used by the Next.js frontend.
@@ -26,12 +26,13 @@ from extractor import (
     extract_pdf,
     friendly_error,
     human_size,
+    is_ocr_available,
     try_authenticate,
     validate_pdf_bytes,
 )
 
 SCOPE_POSITIVE = [
-    "Extract selectable text from every page of a PDF.",
+    "Extract selectable text and use Tesseract OCR on pages without selectable text.",
     "Show filename, page count, page dimensions (mm and points).",
     "Count vector drawing paths and drawing segments per page.",
     "Show a rendered preview of each page.",
@@ -41,8 +42,8 @@ SCOPE_POSITIVE = [
 SCOPE_NEGATIVE = [
     "It does **not** identify room names, room areas, wall lengths, "
     "dimensions or construction quantities.",
-    "It does **not** run OCR (OCR is not supported), so scanned drawings "
-    "that contain no selectable text will report zero text.",
+    "OCR accuracy depends on scan quality; verify any text recognized from "
+    "scanned drawings before relying on it.",
     "Semantic dimension and quantity extraction is a planned future "
     "feature, not something this version can do.",
 ]
@@ -117,6 +118,10 @@ def render_results(
     total_segments = sum(p.get("vector_segments") or 0 for p in pages)
     total_text = sum(p.get("text_characters", 0) for p in pages)
     pages_with_text = sum(1 for p in pages if p.get("text_characters", 0) > 0)
+    pages_with_selectable_text = sum(
+        1 for p in pages if p.get("text_source") == "selectable"
+    )
+    pages_with_ocr_text = sum(1 for p in pages if p.get("text_source") == "ocr")
 
     if not pages:
         st.warning("This PDF contains no pages.")
@@ -132,8 +137,12 @@ def render_results(
     c4.metric("Drawing segments", f"{total_segments:,}" if count_vectors else "n/a")
 
     c5, c6 = st.columns(2)
-    c5.metric("Pages with selectable text", f"{pages_with_text} / {len(pages)}")
+    c5.metric("Pages with extracted text", f"{pages_with_text} / {len(pages)}")
     c6.metric("Total text characters", f"{total_text:,}")
+    st.caption(
+        f"Selectable-text pages: {pages_with_selectable_text} · "
+        f"OCR pages: {pages_with_ocr_text}"
+    )
 
     payload = build_json_payload(info, uploaded_name, file_size)
     file_stem = uploaded_name.rsplit(".", 1)[0] or "extracted"
@@ -147,11 +156,22 @@ def render_results(
     )
 
     if pages_with_text == 0:
+        if not is_ocr_available():
+            st.warning(
+                "No selectable text was found on any page. This usually means "
+                "the drawing is scanned or contains only vector geometry. "
+                "Install Tesseract OCR with English language data and restart "
+                "the app to extract text from image-only pages."
+            )
+        else:
+            st.warning(
+                "No readable text was extracted, even after OCR. Check the "
+                "scan quality and Tesseract's English language data."
+            )
+    elif pages_with_ocr_text:
         st.warning(
-            "No selectable text was found on any page. This usually means the "
-            "drawing is a scanned image or contains only vector geometry. "
-            "OCR is currently unavailable in this version - please try a "
-            "text-based CAD PDF with selectable text."
+            "Some text was recognized by OCR. Verify the extracted labels "
+            "against the drawing."
         )
 
     st.markdown("#### Page overview")
@@ -166,6 +186,7 @@ def render_results(
                 "Height (pt)": page["height_points"],
                 "Rotation (deg)": page["rotation_degrees"],
                 "Text characters": page["text_characters"],
+                "Text source": page.get("text_source", "selectable"),
                 "Vector paths": (
                     page["vector_paths"] if page["vector_paths"] is not None else "n/a"
                 ),
@@ -205,14 +226,14 @@ def render_results(
                     )
             with right:
                 if page["text_characters"] == 0:
-                    st.info(
-                        f"No selectable text found on page {number}. The page is "
-                        "probably a scan or pure vector geometry. OCR is "
-                        "currently unavailable in this version - please try a "
-                        "text-based CAD PDF."
-                    )
+                    st.info(f"No readable text was extracted from page {number}.")
                 else:
-                    st.caption("Selectable text")
+                    source = page.get("text_source", "selectable")
+                    st.caption(
+                        "OCR-recognized text - verify against the drawing"
+                        if source == "ocr"
+                        else "Selectable text"
+                    )
                     st.text_area(
                         f"Text from page {number}",
                         value=page["text"],

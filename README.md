@@ -28,8 +28,8 @@ the same extraction code.
 - Upload a PDF drawing and validate it (invalid, empty, unsupported,
   oversized and password-protected files are reported clearly).
 - **Detects room labels** from readable PDF text and classifies them:
-  bedrooms, kitchens, living rooms, bathrooms, and other rooms (dining,
-  study, store, corridor). Explicit terms (BEDROOM, KITCHEN, LIVING ROOM,
+  bedrooms, kitchens, living rooms, bathrooms, balconies, and other rooms
+  (dining, study, store, corridor). Explicit terms (BEDROOM, KITCHEN, LIVING ROOM,
   BATHROOM...) and abbreviations (BED RM, KIT...) are distinguished;
   abbreviations are reported as *inferred*.
 - **Merges duplicate nearby labels** so one room is not counted twice
@@ -38,15 +38,23 @@ the same extraction code.
 - **Results dashboard**: summary cards (total rooms, bedrooms, kitchens,
   living rooms, bathrooms, other, doors/windows when labelled), plus a
   room-details table (name, type, page, dimensions, area, status).
-- **Geometry association** (vector rectangles and experimental image
-  segmentation) attaches an enclosing drawing region to an already
-  detected label. Geometry alone never creates a room, and vector paths
-  are never counted as rooms.
-- **Dimensions and areas are only calculated** when an explicit drawing
-  scale (e.g. "SCALE 1:100") is found. Outer/overall dimensions on a
-  drawing never establish each room's individual area.
-- Drawing preview, raw extracted text and technical diagnostics are in
-  separate collapsible sections.
+- **Geometry association** attaches a vector rectangle, or an experimental
+  region on non-raster pages, to an already detected label. Geometry alone
+  never creates a room, and vector paths are never counted as rooms.
+- **Tesseract OCR fallback** reads scanned and embedded-image floor plans,
+  including pages that also have a small amount of selectable title text.
+  Full-page images are read at their embedded resolution; weak OCR results
+  trigger alternate layout and focused-crop passes. OCR-recognized labels are
+  marked for review and assigned medium confidence.
+- **Printed room dimensions** with explicit metric or feet-and-inches units
+  (for example "4.50 × 2.10 m" or `11'6" × 10'6"`) are read from drawing
+  text/OCR and associated with nearby room labels. The original printed
+  values are shown in the room table.
+- **Dimensions calculated from drawing geometry** require an explicit scale
+  (e.g. "SCALE 1:100") and a matched room region. Outer/overall dimensions
+  never establish each room's individual area.
+- Drawing preview and technical diagnostics are in separate collapsible
+  sections.
 - Download all structured results (including the room analysis) as JSON.
 
 ## What it does NOT do yet
@@ -54,12 +62,14 @@ the same extraction code.
 - It does **not** invent room counts, dimensions or areas. If a PDF has
   no readable labels, the app says room classification could not be
   reliably determined.
-- It does **not** run OCR (**OCR is not supported** in this version).
-  Drawings without selectable text (scans or image-only exports) get a
-  message telling you that OCR is currently unavailable and to try a
-  text-based CAD PDF.
-- Image-based region detection is **experimental**; it is only used to
-  help associate labels with regions and is never claimed to be reliable.
+- OCR requires the separate **Tesseract OCR** application with English
+  (`eng`) language data installed and its executable available on `PATH`.
+  Without it, scans without selectable text cannot be analyzed.
+- OCR may misread small, blurry, rotated, or low-contrast labels; verify
+  recognized text against the drawing.
+- Image-based region detection is **experimental** and is not used to invent
+  rooms or estimate dimensions from raster scans. Verify OCR labels and
+  dimensions against the drawing, especially for low-resolution images.
 - Wall lengths, construction quantities and takeoffs are out of scope.
 
 ## Requirements
@@ -67,6 +77,7 @@ the same extraction code.
 - Windows, macOS or Linux
 - Python 3.9 or newer (tested with Python 3.14)
 - Node.js 18.18 or newer (tested with Node.js 24) and npm
+- Tesseract OCR with English (`eng`) language data for scanned PDFs
 - About 400 MB of free disk space (Python deps + Next.js `node_modules`)
 
 ## Project layout
@@ -89,7 +100,7 @@ cad-pdf-extractor/
 │   │   ├── page.tsx     # Main UI (analysis dashboard)
 │   │   └── api/extract/route.ts  # Upload → runs backend/cli.py locally
 │   └── package.json
-├── requirements.txt     # Python packages (streamlit, pymupdf, fastapi, uvicorn, python-multipart, numpy)
+├── requirements.txt     # Python packages (streamlit, pymupdf, fastapi, uvicorn, python-multipart, numpy, Pillow)
 └── README.md
 ```
 
@@ -106,6 +117,16 @@ python -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
+
+To enable scanned-PDF OCR, install Tesseract OCR separately, include the
+English (`eng`) language data, and ensure `tesseract.exe` is on `PATH`.
+Verify the installation in a new PowerShell window:
+
+```powershell
+tesseract --version
+```
+
+Restart the app after installing Tesseract so it can find the executable.
 
 If PowerShell blocks the activation script, run this once in the same window:
 
@@ -223,7 +244,7 @@ Press it a second time if it asks for confirmation, then close the window.
 | `backend/main.py`     | FastAPI server: `/api/health`, `/api/extract`                  |
 | `frontend/`           | Next.js app: UI + `/api/extract` local extraction route        |
 | `app.py`              | Original Streamlit UI (optional)                               |
-| `requirements.txt`    | Python packages (`streamlit`, `pymupdf`, `fastapi`, `uvicorn`, `python-multipart`) |
+| `requirements.txt`    | Python packages (`streamlit`, `pymupdf`, `fastapi`, `uvicorn`, `python-multipart`, `Pillow`) |
 | `README.md`           | This file                                                      |
 | `.gitignore`          | Ignores virtual environments, caches, `node_modules`, `.next`  |
 
@@ -246,25 +267,28 @@ Press it a second time if it asks for confirmation, then close the window.
   incomplete. Try re-exporting it.
 - **"This PDF is password protected"** - type the password in the password
   field and extract again.
-- **Zero text on every page** - the drawing is a scan or pure vector
-  geometry. OCR is not supported in this version; re-export the plan as a
-  CAD PDF with selectable text labels and try again.
+- **Zero text on every page** - install Tesseract OCR with English (`eng`)
+  language data, ensure it is on `PATH`, and restart the app. If OCR still
+  finds no text, use a clearer scan or re-export with selectable labels.
 - **Processing is slow on a huge PDF** - lower the preview DPI, reduce the
   maximum preview pages, or untick *Compute vector statistics*.
 
 ## Limitations
 
-- Room detection is **text-label based**. Plans whose room names exist only
-  as scanned pixels (no selectable text) cannot be classified; OCR is not
-  supported in this version (the app asks you to try a text-based CAD PDF).
+- Room detection is **text-label based**. Scanned labels are read with
+  Tesseract OCR when available; verify OCR output because recognition can
+  be imperfect.
 - Room areas are only calculated when an explicit drawing scale is present
   in the PDF text. Outer/overall dimensions do not establish each room's
   area.
 - Geometry (vector rectangles and experimental image segmentation) is only
   used to associate an already detected label with a drawing region; it
   never creates rooms by itself and is not claimed to be reliable.
-- Doors and windows are only counted when readable "DOOR"/"WINDOW" text
-  labels exist; unlabeled openings are not detected.
+- Doors and windows are counted from an opening schedule (e.g. a
+  "SCHEDULE OF OPENINGS" table with D1/W1 IDs), opening tags placed on the
+  drawing (each D1/W1 occurrence is one opening), or readable
+  "DOOR"/"WINDOW" text labels, in that priority order. Door arcs, window
+  glyphs and completely unlabeled openings are not detected.
 - Vector statistics are counts of paths and segments as reported by PyMuPDF,
   not an interpretation of the drawing's geometry.
 - Very large drawings use more memory while rendering previews; the preview
